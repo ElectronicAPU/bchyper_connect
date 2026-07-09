@@ -1,5 +1,8 @@
 # @bchyper/connect-sdk
 
+[![npm version](https://img.shields.io/npm/v/@bchyper/connect-sdk.svg)](https://www.npmjs.com/package/@bchyper/connect-sdk)
+[![npm downloads](https://img.shields.io/npm/dm/@bchyper/connect-sdk.svg)](https://www.npmjs.com/package/@bchyper/connect-sdk)
+
 SDK for connecting the BC Hyper mobile wallet to any web dApp via a pairing server.
 
 Works with **React**, **Next.js**, **Vue 3**, **Angular**, **Svelte**, or any plain JavaScript project.

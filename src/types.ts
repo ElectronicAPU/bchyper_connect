@@ -112,6 +112,7 @@ export interface UseBChyperConnectReturn {
   // State
   isConnected: boolean;
   isConnecting: boolean;
+  isDisconnected: boolean;
   address: string | null;             // sessionCode
   mobileAddress: string | null;       // actual wallet address
   qrImageBase64: string | null;
@@ -123,6 +124,7 @@ export interface UseBChyperConnectReturn {
   // Actions
   connectToBCSwap: () => void;
   disconnectBCSwap: () => void;
+  reconnectSession: (savedSession: string, savedAddress?: string) => void;
   sendTransaction: (txDetails: TransactionDetails) => void;
   resetTransactionState: () => void;
 }

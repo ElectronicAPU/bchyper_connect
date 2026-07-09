@@ -21,6 +21,7 @@ export function useBChyperConnect(
   // State (mirrors useBCSwapConnect.js exactly)
   const [isConnected,       setIsConnected]       = useState(false);
   const [isConnecting,      setIsConnecting]      = useState(false);
+  const [isDisconnected,    setIsDisconnected]    = useState(false);
   const [address,           setAddress]           = useState<string | null>(null);
   const [mobileAddress,     setMobileAddress]     = useState<string | null>(null);
   const [qrImageBase64,     setQrImageBase64]     = useState<string | null>(null);
@@ -41,11 +42,11 @@ export function useBChyperConnect(
 
   // Internal helpers
 
+  // Resets in-memory state only. Does NOT touch localStorage — the saved
+  // session/address are needed by reconnectSession() when mobile drops the
+  // connection unexpectedly. Storage is only cleared on an intentional
+  // web-side disconnect (see disconnectBCSwap).
   const _resetState = useCallback((error?: string) => {
-    localStorage.removeItem(STORAGE_KEY_SESSION);
-    localStorage.removeItem(STORAGE_KEY_QR);
-    localStorage.removeItem(STORAGE_KEY_ADDRESS);
-
     setIsConnected(false);
     setIsConnecting(false);
     setAddress(null);
@@ -116,6 +117,7 @@ export function useBChyperConnect(
     if (isConnectingRef.current || isConnectedRef.current) return;
 
     _resetState();
+    setIsDisconnected(false);
     setIsConnecting(true);
 
     // Cleanup previous connector
@@ -161,7 +163,10 @@ export function useBChyperConnect(
     });
 
     connector.on("disconnected", ({ message }) => {
+      // Mobile dropped the connection — keep localStorage intact so
+      // reconnectSession() can restore the session afterward.
       _resetState(`Disconnected: ${message}`);
+      setIsDisconnected(true);
     });
 
     connector.on("error", (msg) => {
@@ -171,12 +176,53 @@ export function useBChyperConnect(
     connector.connect();
   }, [appName, pairingUrl, _resetState]);
 
+  // reconnectSession()
+  // Runtime reconnect (no page reload) after mobile drops the connection.
+
+  const reconnectSession = useCallback((savedSession: string, savedAddress?: string) => {
+    if (!savedSession) return;
+
+    connectorRef.current?.disconnect();
+    setIsDisconnected(false);
+    setIsConnecting(true);
+
+    const connector = new BChyperConnect({ appName, pairingUrl });
+    connectorRef.current = connector;
+
+    connector.on("reconnected", ({ walletAddress }) => {
+      const resolvedAddress = walletAddress || savedAddress || "";
+      setMobileAddress(resolvedAddress);
+      setAddress(savedSession);
+      setIsConnected(true);
+      setIsConnecting(false);
+      setConnectionError(null);
+      localStorage.setItem(STORAGE_KEY_SESSION, savedSession);
+      localStorage.setItem(STORAGE_KEY_ADDRESS, resolvedAddress);
+    });
+
+    connector.on("disconnected", ({ message }) => {
+      _resetState(`Disconnected: ${message}`);
+      setIsDisconnected(true);
+    });
+
+    connector.on("error", (msg) => {
+      _resetState(msg);
+    });
+
+    connector.reconnect(savedSession, savedAddress);
+  }, [appName, pairingUrl, _resetState]);
+
   // disconnectBCSwap()
-  // Mirrors disconnectBCSwap() in useBCSwapConnect.js
+  // Mirrors disconnectBCSwap() in useBCSwapConnect.js — intentional web-side
+  // disconnect, so this is the only place saved session data is cleared.
 
   const disconnectBCSwap = useCallback(() => {
     connectorRef.current?.disconnect();
+    localStorage.removeItem(STORAGE_KEY_SESSION);
+    localStorage.removeItem(STORAGE_KEY_QR);
+    localStorage.removeItem(STORAGE_KEY_ADDRESS);
     _resetState();
+    setIsDisconnected(false);
   }, [_resetState]);
 
   // sendTransaction()
@@ -207,6 +253,7 @@ export function useBChyperConnect(
   return {
     isConnected,
     isConnecting,
+    isDisconnected,
     address,
     mobileAddress,
     qrImageBase64,
@@ -216,6 +263,7 @@ export function useBChyperConnect(
     transactionResult,
     connectToBCSwap,
     disconnectBCSwap,
+    reconnectSession,
     sendTransaction,
     resetTransactionState,
   };

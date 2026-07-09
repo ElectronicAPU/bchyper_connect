@@ -1,4 +1,4 @@
-# bchyper_connect
+# @bchyper/connect-sdk
 
 SDK for connecting the BC Hyper mobile wallet to any web dApp via a pairing server.
 
@@ -9,7 +9,7 @@ Works with **React**, **Next.js**, **Vue 3**, **Angular**, **Svelte**, or any pl
 ## Installation
 
 ```bash
-npm install bchyper_connect
+npm install @bchyper/connect-sdk
 ```
 
 ---
@@ -50,17 +50,20 @@ NEXT_PUBLIC_PAIRING_URL=wss://pairing.bcswap.org
 ### Step 1 — Call the hook
 
 ```tsx
-import { useBChyperConnect } from 'bchyper_connect';
+import { useBChyperConnect } from '@bchyper/connect-sdk';
 
 function App() {
   const {
     isConnected,
     isConnecting,
-    mobileAddress,      // actual wallet address from mobile
-    qrImageBase64,      // base64 QR image — show this to the user
+    isDisconnected,      // true only when mobile drops the connection
+    address,             // sessionCode
+    mobileAddress,       // actual wallet address from mobile
+    qrImageBase64,       // base64 QR image — show this to the user
     connectionError,
     connectToBCSwap,
     disconnectBCSwap,
+    reconnectSession,    // (savedSession, savedAddress) => void — runtime reconnect
     sendTransaction,
     transactionStatus,  // "idle" | "pending" | "accepted" | "rejected"
     transactionResult,
@@ -144,6 +147,26 @@ useEffect(() => {
 <button onClick={disconnectBCSwap}>Disconnect</button>
 ```
 
+### Step 6 — Handle mobile-side disconnect and reconnect at runtime
+
+If the mobile app drops the connection (app killed, network loss, etc.) without a page reload, `isDisconnected` becomes `true` and the saved session/address remain in `localStorage`. Call `reconnectSession` to re-pair without asking the user to scan a new QR code:
+
+```tsx
+import { useEffect } from 'react';
+
+useEffect(() => {
+  if (isDisconnected) {
+    const savedSession = localStorage.getItem('bcswap_wallet_session');
+    const savedAddress = localStorage.getItem('bcswap_mobile_address');
+    if (savedSession) {
+      reconnectSession(savedSession, savedAddress ?? undefined);
+    }
+  }
+}, [isDisconnected]);
+```
+
+> Note: `disconnectBCSwap()` (intentional, web-initiated disconnect) clears `localStorage` and resets `isDisconnected` to `false`. A mobile-initiated drop does **not** clear `localStorage`, so `reconnectSession` has what it needs to restore the session.
+
 ---
 
 ## Option B — Vue 3 (Composable)
@@ -153,7 +176,7 @@ Create a composable file `useBChyper.js` in your Vue project:
 ```js
 // src/composables/useBChyper.js
 import { ref, onUnmounted } from 'vue';
-import { BChyperConnect } from 'bchyper_connect';
+import { BChyperConnect } from '@bchyper/connect-sdk';
 
 export function useBChyper() {
   const isConnected    = ref(false);
@@ -260,7 +283,7 @@ Create a service in your Angular project:
 // src/app/services/bchyper.service.ts
 import { Injectable, OnDestroy } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
-import { BChyperConnect } from 'bchyper_connect';
+import { BChyperConnect } from '@bchyper/connect-sdk';
 
 @Injectable({ providedIn: 'root' })
 export class BChyperService implements OnDestroy {
@@ -346,7 +369,7 @@ export class WalletComponent {
 ```js
 // src/stores/bchyper.js
 import { writable } from 'svelte/store';
-import { BChyperConnect } from 'bchyper_connect';
+import { BChyperConnect } from '@bchyper/connect-sdk';
 
 const connector = new BChyperConnect({
   appName:    'BCSWAP',
@@ -399,7 +422,7 @@ Use it in any Svelte component:
 ## Option E — Plain JavaScript
 
 ```js
-import { BChyperConnect } from 'bchyper_connect';
+import { BChyperConnect } from '@bchyper/connect-sdk';
 
 const connector = new BChyperConnect({
   appName:    'BCSWAP',
@@ -481,7 +504,7 @@ import type {
   TransactionResult,      // { data?: { txHash? }, message?, ... }
   TransactionStatus,      // "idle" | "pending" | "accepted" | "rejected"
   BChyperEvents,          // all event signatures
-} from 'bchyper_connect';
+} from '@bchyper/connect-sdk';
 ```
 
 ---

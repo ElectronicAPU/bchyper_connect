@@ -94,8 +94,15 @@ export function useBChyperConnect(
         setTransactionResult(res);
       });
 
-      // otherDisconnected is intentionally ignored on restore to prevent
-      // UI flash on temp disconnect — mirrors hook behaviour exactly
+      // A genuine mobile-side disconnect (app killed, network loss, or the
+      // user disconnecting from the mobile app itself) must be reported
+      // here too — otherwise a session restored on page load can look
+      // permanently "connected" even after the phone has actually dropped it.
+      connector.on("disconnected", ({ message }) => {
+        _resetState(`Disconnected: ${message}`);
+        setIsDisconnected(true);
+      });
+
       connector.on("error", (msg) => setConnectionError(msg));
 
       connector.reconnect(savedSession, savedAddress ?? undefined);

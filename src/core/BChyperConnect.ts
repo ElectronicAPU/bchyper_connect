@@ -121,9 +121,10 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
       );
     });
 
-    // On restore, otherDisconnected is intentionally ignored to prevent
-    // UI flash on temp disconnect — mirrors hook behaviour exactly
-    this._attachCoreListeners(socket, { ignoreOtherDisconnected: true });
+    // otherDisconnected is reported on restored sessions too, so a genuine
+    // mobile-side disconnect (including one the user triggers manually from
+    // the mobile app) is never silently swallowed after a reconnect/reload.
+    this._attachCoreListeners(socket);
   }
 
   // sendTransaction()

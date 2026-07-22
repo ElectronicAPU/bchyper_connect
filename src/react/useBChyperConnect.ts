@@ -137,7 +137,7 @@ export function useBChyperConnect(
       setQrImageBase64(qrImage);
       localStorage.setItem(STORAGE_KEY_QR, qrImage);
       if (sessionCode) {
-        // Store temp sessionCode from QR — confirmed in mobileConnected
+        setAddress(sessionCode)
       }
     });
 

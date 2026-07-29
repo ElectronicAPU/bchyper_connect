@@ -7,6 +7,8 @@ import {
 } from "../constants";
 import type {
   BChyperConnectOptions,
+  ConnectionListWebResponse,
+  ConnectionRemovedResponse,
   TransactionDetails,
   TransactionResult,
   TransactionStatus,
@@ -16,7 +18,7 @@ import type {
 export function useBChyperConnect(
   options: BChyperConnectOptions
 ): UseBChyperConnectReturn {
-  const { appName, pairingUrl } = options;
+  const { appName, pairingUrl, deviceInfo } = options;
 
   // State (mirrors useBCSwapConnect.js exactly)
   const [isConnected,       setIsConnected]       = useState(false);
@@ -69,7 +71,7 @@ export function useBChyperConnect(
       if (savedQr)      setQrImageBase64(savedQr);
       if (savedAddress) setMobileAddress(savedAddress);
 
-      const connector = new BChyperConnect({ appName, pairingUrl });
+      const connector = new BChyperConnect({ appName, pairingUrl, deviceInfo });
       connectorRef.current = connector;
 
       connector.on("connected", ({ walletAddress }) => {
@@ -130,7 +132,7 @@ export function useBChyperConnect(
     // Cleanup previous connector
     connectorRef.current?.disconnect();
 
-    const connector = new BChyperConnect({ appName, pairingUrl });
+    const connector = new BChyperConnect({ appName, pairingUrl, deviceInfo });
     connectorRef.current = connector;
 
     connector.on("qr", ({ qrImage, sessionCode }) => {
@@ -193,7 +195,7 @@ export function useBChyperConnect(
     setIsDisconnected(false);
     setIsConnecting(true);
 
-    const connector = new BChyperConnect({ appName, pairingUrl });
+    const connector = new BChyperConnect({ appName, pairingUrl, deviceInfo });
     connectorRef.current = connector;
 
     connector.on("reconnected", ({ walletAddress }) => {
@@ -242,6 +244,24 @@ export function useBChyperConnect(
     connectorRef.current.sendTransaction(txDetails);
   }, []);
 
+  // getConnections()
+  // Lists all active connections paired to this app name.
+  const getConnections = useCallback((): Promise<ConnectionListWebResponse> => {
+    if (!connectorRef.current) {
+      return Promise.reject(new Error("Not connected"));
+    }
+    return connectorRef.current.getConnections();
+  }, []);
+
+  // removeConnection()
+  // Removes/logs out a specific connection by id.
+  const removeConnection = useCallback((id: number): Promise<ConnectionRemovedResponse> => {
+    if (!connectorRef.current) {
+      return Promise.reject(new Error("Not connected"));
+    }
+    return connectorRef.current.removeConnection(id);
+  }, []);
+
   // resetTransactionState()
 
   const resetTransactionState = useCallback(() => {
@@ -273,5 +293,7 @@ export function useBChyperConnect(
     reconnectSession,
     sendTransaction,
     resetTransactionState,
+    getConnections,
+    removeConnection,
   };
 }

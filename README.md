@@ -71,9 +71,17 @@ function App() {
     transactionStatus,  // "idle" | "pending" | "accepted" | "rejected"
     transactionResult,
     resetTransactionState,
+    getConnections,      // () => Promise<ConnectionListWebResponse>
+    removeConnection,    // (id: number) => Promise<ConnectionRemovedResponse>
   } = useBChyperConnect({
     appName:    'BCSWAP',
     pairingUrl: import.meta.env.VITE_PAIRING_URL, // Next.js: process.env.NEXT_PUBLIC_PAIRING_URL
+    deviceInfo: {
+      webIpAddress:      '203.0.113.10',
+      webBrowser:         navigator.userAgent,
+      webLocation:        'Kolkata, IN',
+      webOperatingSystem: navigator.platform,
+    },
   });
 }
 ```
@@ -169,6 +177,36 @@ useEffect(() => {
 ```
 
 > Note: `disconnectBCSwap()` (intentional, web-initiated disconnect) clears `localStorage` and resets `isDisconnected` to `false`. A mobile-initiated drop does **not** clear `localStorage`, so `reconnectSession` has what it needs to restore the session.
+
+### Step 7 — List and manage active connections
+
+Every paired browser/device is tracked server-side per `appName`. Use `getConnections` to list them and `removeConnection` to log one out remotely — like a "manage devices" screen:
+
+```tsx
+const [sessions, setSessions] = useState<ConnectionSession[]>([]);
+
+async function loadSessions() {
+  const res = await getConnections();
+  if (res.status) setSessions(res.data.sessions);
+}
+
+async function logoutSession(id: number) {
+  const res = await removeConnection(id);
+  if (res.status) {
+    setSessions((prev) => prev.filter((s) => s.id !== res.data.session.id));
+  }
+}
+```
+
+```tsx
+{sessions.map((s) => (
+  <div key={s.id}>
+    <p>{s.webBrowser} — {s.webLocation} ({s.webOperatingSystem})</p>
+    <p>{s.isWebAlive ? 'Active' : 'Inactive'} · last seen {s.lastSeenAt}</p>
+    <button onClick={() => logoutSession(s.id)}>Log out</button>
+  </div>
+))}
+```
 
 ---
 
@@ -463,9 +501,11 @@ document.getElementById('disconnect-btn').addEventListener('click', () => connec
 
 | Event | Payload | When |
 |---|---|---|
-| `webQr` | `{ webApp: string }` | Fresh connect — requests QR |
+| `webQr` | `{ webApp, webIpAddress?, webBrowser?, webLocation?, webOperatingSystem? }` | Fresh connect — requests QR |
 | `webReconnect` | `{ sessionCode: string }` | Page reload — restores session |
 | `webSendTransaction` | `{ sessionCode, walletAddress, remark, app, transactionDetails }` | Sending tx to mobile |
+| `connectionListWeb` | `{ webAppName: string }` | Requesting the list of active connections |
+| `connectionRemoveWeb` | `{ webAppName: string, id: number }` | Removing/logging out a connection by id |
 
 ### Server → Web (received by SDK)
 
@@ -477,6 +517,7 @@ document.getElementById('disconnect-btn').addEventListener('click', () => connec
 | `transactionAccepted` | `{ data?: { txHash? }, message? }` | Mobile signed and broadcast tx |
 | `transactionRejected` | `{ data?, message? }` | Mobile rejected tx |
 | `otherDisconnected` | `{ message }` | Mobile disconnected |
+| `connectionRemoved` | `{ status, message, data: { session } }` | A connection was removed (ack for `connectionRemoveWeb`, also pushed to the removed session) |
 
 ---
 
@@ -502,11 +543,15 @@ These three keys are used by the SDK internally. All frameworks share the same k
 
 ```ts
 import type {
-  BChyperConnectOptions,  // { appName, pairingUrl }
-  TransactionDetails,     // { [action: string]: Record<string, any> }
-  TransactionResult,      // { data?: { txHash? }, message?, ... }
-  TransactionStatus,      // "idle" | "pending" | "accepted" | "rejected"
-  BChyperEvents,          // all event signatures
+  BChyperConnectOptions,     // { appName, pairingUrl, deviceInfo? }
+  WebDeviceInfo,             // { webIpAddress?, webBrowser?, webLocation?, webOperatingSystem? }
+  TransactionDetails,        // { [action: string]: Record<string, any> }
+  TransactionResult,         // { data?: { txHash? }, message?, ... }
+  TransactionStatus,         // "idle" | "pending" | "accepted" | "rejected"
+  BChyperEvents,             // all event signatures
+  ConnectionSession,         // a single paired connection record
+  ConnectionListWebResponse, // { status, message, data: { sessions } }
+  ConnectionRemovedResponse, // { status, message, data: { session } }
 } from '@bchyper/connect-sdk';
 ```
 

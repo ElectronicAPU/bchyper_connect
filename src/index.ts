@@ -7,6 +7,7 @@ export { useBChyperConnect } from "./react/useBChyperConnect";
 // Types
 export type {
   BChyperConnectOptions,
+  WebDeviceInfo,
   SwapTransactionDetails,
   SwapDetails,
   SendTransactionPayload,
@@ -14,6 +15,9 @@ export type {
   TransactionStatus,
   BChyperEvents,
   UseBChyperConnectReturn,
+  ConnectionSession,
+  ConnectionListWebResponse,
+  ConnectionRemovedResponse,
 } from "./types";
 
 // Constants (in case consumer wants storage key names)

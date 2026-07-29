@@ -15,6 +15,9 @@ import type {
   OtherDisconnectedData,
   TransactionResult,
   QrResponse,
+  WebDeviceInfo,
+  ConnectionListWebResponse,
+  ConnectionRemovedResponse,
 } from "../types";
 
 export class BChyperConnect extends EventEmitter<BChyperEvents> {
@@ -23,6 +26,7 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
   private walletAddress: string | null = null;
   private appName: string;
   private pairingUrl: string;
+  private deviceInfo: WebDeviceInfo;
   private _isConnecting = false;
   private _isConnected = false;
 
@@ -30,6 +34,7 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
     super();
     this.appName = options.appName;
     this.pairingUrl = options.pairingUrl;
+    this.deviceInfo = options.deviceInfo ?? {};
   }
 
   // Getters
@@ -53,16 +58,19 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
 
     let qrRequested = false;
 
+    const webQrPayload = { webApp: this.appName, ...this.deviceInfo };
+
     const requestQr = () => {
       if (qrRequested) return;
 
-      socket.emit("webQr", { webApp: this.appName }, (response: QrResponse | QrResponse[]) => {
+      socket.emit("webQr", webQrPayload, (response: QrResponse | QrResponse[]) => {
         const data = Array.isArray(response) ? response[0] : response;
 
         if (data?.qrImage) {
           if (data.sessionCode) this.sessionCode = data.sessionCode;
           qrRequested = true;
           this.emit("qr", {
+            ...webQrPayload,
             qrImage: data.qrImage,
             sessionCode: this.sessionCode ?? "",
           });
@@ -81,6 +89,7 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
         if (data.sessionCode) this.sessionCode = data.sessionCode;
         qrRequested = true;
         this.emit("qr", {
+          ...webQrPayload,
           qrImage: data.qrImage,
           sessionCode: this.sessionCode ?? "",
         });
@@ -168,6 +177,40 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
     this._reset();
   }
 
+  // getConnections()
+  // Lists all active connections paired to this app name.
+  getConnections(): Promise<ConnectionListWebResponse> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket?.connected) {
+        reject(new Error("Cannot list connections: socket not connected"));
+        return;
+      }
+
+      this.socket.emit(
+        "connectionListWeb",
+        { webAppName: this.appName },
+        (response: ConnectionListWebResponse) => resolve(response)
+      );
+    });
+  }
+
+  // removeConnection()
+  // Removes/logs out a specific connection by id (from getConnections()).
+  removeConnection(id: number): Promise<ConnectionRemovedResponse> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket?.connected) {
+        reject(new Error("Cannot remove connection: socket not connected"));
+        return;
+      }
+
+      this.socket.emit(
+        "connectionRemoveWeb",
+        { webAppName: this.appName, id },
+        (response: ConnectionRemovedResponse) => resolve(response)
+      );
+    });
+  }
+
   // Private
 
   private _attachCoreListeners(
@@ -211,6 +254,10 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
 
     socket.on("transactionRejected", (response: TransactionResult) => {
       this.emit("transactionRejected", response);
+    });
+
+    socket.on("connectionRemoved", (response: ConnectionRemovedResponse) => {
+      this.emit("connectionRemoved", response);
     });
 
     socket.on("otherDisconnected", (data: OtherDisconnectedData) => {

@@ -2,6 +2,15 @@
 export interface BChyperConnectOptions {
   appName: string;    // sent as { webApp } in webQr emit
   pairingUrl: string; // your BCSWAP_PAIRING_URL value
+  deviceInfo?: WebDeviceInfo;
+}
+
+// Optional device metadata sent with webQr, shown in the connection list
+export interface WebDeviceInfo {
+  webIpAddress?: string;
+  webBrowser?: string;
+  webLocation?: string;
+  webOperatingSystem?: string;
 }
 
 // Transaction
@@ -44,7 +53,7 @@ export interface SendTransactionPayload {
 // Socket Event Payloads
 
 // Emitted: webQr
-export interface WebQrPayload {
+export interface WebQrPayload extends WebDeviceInfo {
   webApp: string;
 }
 
@@ -52,6 +61,58 @@ export interface WebQrPayload {
 export interface QrResponse {
   qrImage: string;
   sessionCode?: string;
+}
+
+// Emitted: connectionListWeb
+export interface ConnectionListWebPayload {
+  webAppName: string;
+}
+
+// A single connection record returned by connectionListWeb / connectionRemoveWeb
+export interface ConnectionSession {
+  id: number;
+  sessionCode: string;
+  webAppName: string;
+  webSocketId: string | null;
+  webIpAddress: string | null;
+  webBrowser: string | null;
+  webLocation: string | null;
+  webOperatingSystem: string | null;
+  appSocketId: string | null;
+  appIpAddress: string | null;
+  appBrowser: string | null;
+  appLocation: string | null;
+  appOperatingSystem: string | null;
+  isWebAlive: boolean;
+  lastSeenAt: string | null;
+  isExpired: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+// Ack from connectionListWeb
+export interface ConnectionListWebResponse {
+  status: boolean;
+  message: string;
+  data: {
+    sessions: ConnectionSession[];
+  };
+}
+
+// Emitted: connectionRemoveWeb
+export interface ConnectionRemoveWebPayload {
+  webAppName: string;
+  id: number;
+}
+
+// Received: connectionRemoved (also the ack shape for connectionRemoveWeb)
+export interface ConnectionRemovedResponse {
+  status: boolean;
+  message: string;
+  data: {
+    session: ConnectionSession;
+  };
 }
 
 // Emitted: webReconnect
@@ -95,12 +156,13 @@ export interface TransactionResult {
 // SDK Event Map (EventEmitter typed events)
 
 export interface BChyperEvents {
-  qr:                  (payload: { qrImage: string; sessionCode: string }) => void;
+  qr:                  (payload: WebQrPayload & { qrImage: string; sessionCode: string }) => void;
   connected:           (payload: { sessionCode: string; walletAddress: string }) => void;
   reconnected:         (payload: { walletAddress: string }) => void;
   transactionAccepted: (result: TransactionResult) => void;
   transactionRejected: (result: TransactionResult) => void;
   disconnected:        (payload: { message: string }) => void;
+  connectionRemoved:   (response: ConnectionRemovedResponse) => void;
   error:               (message: string) => void;
 }
 
@@ -127,4 +189,6 @@ export interface UseBChyperConnectReturn {
   reconnectSession: (savedSession: string, savedAddress?: string) => void;
   sendTransaction: (txDetails: TransactionDetails) => void;
   resetTransactionState: () => void;
+  getConnections: () => Promise<ConnectionListWebResponse>;
+  removeConnection: (id: number) => Promise<ConnectionRemovedResponse>;
 }

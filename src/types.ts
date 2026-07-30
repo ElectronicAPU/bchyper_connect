@@ -185,10 +185,11 @@ export interface UseBChyperConnectReturn {
   transactionResult: TransactionResult | null;
   // Actions
   connectToBCSwap: () => void;
-  disconnectBCSwap: () => void;
+  disconnectBCSwap: () => Promise<void>;
   reconnectSession: (savedSession: string, savedAddress?: string) => void;
   sendTransaction: (txDetails: TransactionDetails) => void;
   resetTransactionState: () => void;
-  getConnections: () => Promise<ConnectionListWebResponse>;
-  removeConnection: (id: number) => Promise<ConnectionRemovedResponse>;
+  getConnections: (appName?: string) => Promise<ConnectionListWebResponse>;
+  removeConnection: (id: number, appName?: string) => Promise<ConnectionRemovedResponse>;
+  currentSocketId: () => string | null;
 }

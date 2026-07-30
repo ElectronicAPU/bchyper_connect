@@ -71,8 +71,9 @@ function App() {
     transactionStatus,  // "idle" | "pending" | "accepted" | "rejected"
     transactionResult,
     resetTransactionState,
-    getConnections,      // () => Promise<ConnectionListWebResponse>
-    removeConnection,    // (id: number) => Promise<ConnectionRemovedResponse>
+    getConnections,      // (appName?) => Promise<ConnectionListWebResponse>
+    removeConnection,    // (id: number, appName?) => Promise<ConnectionRemovedResponse>
+    currentSocketId,     // () => string | null — this tab's own webSocketId, for matching against connectionListWeb's sessions
   } = useBChyperConnect({
     appName:    'BCSWAP',
     pairingUrl: import.meta.env.VITE_PAIRING_URL, // Next.js: process.env.NEXT_PUBLIC_PAIRING_URL
@@ -155,8 +156,10 @@ useEffect(() => {
 ### Step 5 — Disconnect
 
 ```tsx
-<button onClick={disconnectBCSwap}>Disconnect</button>
+<button onClick={() => disconnectBCSwap()}>Disconnect</button>
 ```
+
+`disconnectBCSwap()` is now `async`. Internally it first asks the server to remove this tab's own connection record (best-effort, capped at ~2.5s so a slow/unreachable server never blocks the click) and only then closes the socket and clears `localStorage`. Awaiting it is optional — the local disconnect always happens even if the server round-trip fails or times out — but await it if you want to know the cleanup attempt has finished before e.g. redirecting the user.
 
 ### Step 6 — Handle mobile-side disconnect and reconnect at runtime
 
@@ -180,7 +183,7 @@ useEffect(() => {
 
 ### Step 7 — List and manage active connections
 
-Every paired browser/device is tracked server-side per `appName`. Use `getConnections` to list them and `removeConnection` to log one out remotely — like a "manage devices" screen:
+Every paired browser/device is tracked server-side per `appName`. Use `getConnections` to list them and `removeConnection` to log one out remotely — like a "manage devices" screen. Compare each session's `webSocketId` against `currentSocketId()` to mark/handle "this is the tab you're using right now" specially (e.g. disconnect locally too if the user revokes it):
 
 ```tsx
 const [sessions, setSessions] = useState<ConnectionSession[]>([]);
@@ -190,23 +193,32 @@ async function loadSessions() {
   if (res.status) setSessions(res.data.sessions);
 }
 
-async function logoutSession(id: number) {
+async function logoutSession(id: number, isCurrentSession: boolean) {
   const res = await removeConnection(id);
   if (res.status) {
     setSessions((prev) => prev.filter((s) => s.id !== res.data.session.id));
+    if (isCurrentSession) {
+      // You just revoked the session this tab is using — disconnect locally too.
+      await disconnectBCSwap();
+    }
   }
 }
 ```
 
 ```tsx
-{sessions.map((s) => (
-  <div key={s.id}>
-    <p>{s.webBrowser} — {s.webLocation} ({s.webOperatingSystem})</p>
-    <p>{s.isWebAlive ? 'Active' : 'Inactive'} · last seen {s.lastSeenAt}</p>
-    <button onClick={() => logoutSession(s.id)}>Log out</button>
-  </div>
-))}
+{sessions.map((s) => {
+  const isCurrentSession = s.webSocketId === currentSocketId();
+  return (
+    <div key={s.id}>
+      <p>{s.webBrowser} — {s.webLocation} ({s.webOperatingSystem}){isCurrentSession ? ' (You)' : ''}</p>
+      <p>{s.isWebAlive ? 'Active' : 'Inactive'} · last seen {s.lastSeenAt}</p>
+      <button onClick={() => logoutSession(s.id, isCurrentSession)}>Log out</button>
+    </div>
+  );
+})}
 ```
+
+> **Note on server ack behavior:** some pairing server versions do not acknowledge `connectionListWeb` / `connectionRemoveWeb` / `webReconnect` with a proper socket.io ack packet — they instead re-emit the result as a plain event with the same name. The SDK already handles this: `getConnections`, `removeConnection`, and the internal `webReconnect` handshake all listen for both the ack callback and the plain event, resolving on whichever arrives first. No extra handling is needed on your end.
 
 ---
 
@@ -275,8 +287,8 @@ export function useBChyper() {
     connector.connect();
   };
 
-  const disconnect = () => {
-    connector.disconnect();
+  const disconnect = async () => {
+    await connector.disconnect(); // async — removes this session server-side before closing the socket
     isConnected.value   = false;
     mobileAddress.value = null;
   };
@@ -375,10 +387,10 @@ export class BChyperService implements OnDestroy {
   }
 
   connect()                           { this.connector.connect(); }
-  disconnect()                        { this.connector.disconnect(); this.isConnected$.next(false); }
+  async disconnect()                  { await this.connector.disconnect(); this.isConnected$.next(false); }
   sendTransaction(txDetails: any)     { this.txStatus$.next('pending'); this.connector.sendTransaction(txDetails); }
 
-  ngOnDestroy() { this.connector.disconnect(); }
+  ngOnDestroy() { this.connector.disconnect(); } // fire-and-forget on teardown is fine
 }
 ```
 
@@ -433,7 +445,7 @@ connector.on('disconnected',      ({ message })       => { isConnected.set(false
 connector.on('error',             (msg)               => error.set(msg));
 
 export const connect         = ()          => connector.connect();
-export const disconnect      = ()          => { connector.disconnect(); isConnected.set(false); mobileAddress.set(null); };
+export const disconnect      = async ()    => { await connector.disconnect(); isConnected.set(false); mobileAddress.set(null); };
 export const sendTransaction = (txDetails) => { txStatus.set('pending'); connector.sendTransaction(txDetails); };
 ```
 
@@ -490,8 +502,22 @@ connector.on('transactionRejected', (result) => {
 connector.on('error', (msg) => console.error(msg));
 
 document.getElementById('connect-btn').addEventListener('click', () => connector.connect());
-document.getElementById('disconnect-btn').addEventListener('click', () => connector.disconnect());
+document.getElementById('disconnect-btn').addEventListener('click', () => connector.disconnect()); // async — safe to fire-and-forget here
 ```
+
+---
+
+## Core class reference (`BChyperConnect`)
+
+For Vue / Angular / Svelte / plain JS usage (Options B–E), these are the relevant methods and getters beyond `connect()` / `reconnect()` / `sendTransaction()`:
+
+| Member | Type | Description |
+|---|---|---|
+| `disconnect()` | `() => Promise<void>` | Intentional, permanent disconnect. Best-effort removes this session's server-side record (`connectionListWeb`/`connectionRemoveWeb`), capped at ~2.5s, then closes the socket. Use this for a user-clicked "Disconnect" button. |
+| `closeSocket()` | `() => void` | Plain, synchronous socket teardown with **no** server-side session removal. Use this only when immediately replacing the socket for the *same* session (e.g. your own `reconnectSession`-style logic) — calling `disconnect()` there would incorrectly tell the server to drop the session you're about to restore. |
+| `socketId` | `string \| null` (getter) | The current socket's own id (`webSocketId` as the server sees it). Compare against a `connectionListWeb` session's `webSocketId` to find "this connection, right now." |
+| `getConnections(appName?)` | `() => Promise<ConnectionListWebResponse>` | List all sessions for `appName` (defaults to the `appName` passed to the constructor). |
+| `removeConnection(id, appName?)` | `() => Promise<ConnectionRemovedResponse>` | Revoke a session by its list `id`. |
 
 ---
 
@@ -518,6 +544,8 @@ document.getElementById('disconnect-btn').addEventListener('click', () => connec
 | `transactionRejected` | `{ data?, message? }` | Mobile rejected tx |
 | `otherDisconnected` | `{ message }` | Mobile disconnected |
 | `connectionRemoved` | `{ status, message, data: { session } }` | A connection was removed (ack for `connectionRemoveWeb`, also pushed to the removed session) |
+
+> **Ack vs. plain-event note:** on some server deployments, `connectionListWeb`, `connectionRemoveWeb`, and `webReconnect` responses arrive as a plain re-emitted event (`42["eventName", data]`) rather than a proper socket.io ack packet (`43<id>[data]`) tied to the original request. If you're inspecting the raw WebSocket frames and see the response event but the SDK's promise/callback never resolves, this is the cause. The SDK's `getConnections`, `removeConnection`, and internal `reconnect()` already listen for both forms and resolve on whichever fires first — this is handled for you, but worth knowing if you ever bypass the SDK and talk to the socket directly.
 
 ---
 

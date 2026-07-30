@@ -191,7 +191,10 @@ export function useBChyperConnect(
   const reconnectSession = useCallback((savedSession: string, savedAddress?: string) => {
     if (!savedSession) return;
 
-    connectorRef.current?.disconnect();
+    // Just close the stale socket — do NOT run disconnect()'s
+    // removeConnection cleanup here, since that would tell the server to
+    // drop the very session we're about to restore via connector.reconnect().
+    connectorRef.current?.closeSocket();
     setIsDisconnected(false);
     setIsConnecting(true);
 
@@ -225,17 +228,14 @@ export function useBChyperConnect(
   // Mirrors disconnectBCSwap() in useBCSwapConnect.js — intentional web-side
   // disconnect, so this is the only place saved session data is cleared.
 
-  const disconnectBCSwap = useCallback(() => {
-    connectorRef.current?.disconnect();
+  const disconnectBCSwap = useCallback(async () => {
+    await connectorRef.current?.disconnect();
     localStorage.removeItem(STORAGE_KEY_SESSION);
     localStorage.removeItem(STORAGE_KEY_QR);
     localStorage.removeItem(STORAGE_KEY_ADDRESS);
     _resetState();
     setIsDisconnected(false);
   }, [_resetState]);
-
-  // sendTransaction()
-  // Mirrors sendTransaction() in useBCSwapConnect.js
 
   const sendTransaction = useCallback((txDetails: TransactionDetails) => {
     if (!connectorRef.current) return;
@@ -244,25 +244,23 @@ export function useBChyperConnect(
     connectorRef.current.sendTransaction(txDetails);
   }, []);
 
-  // getConnections()
-  // Lists all active connections paired to this app name.
-  const getConnections = useCallback((): Promise<ConnectionListWebResponse> => {
+  const getConnections = useCallback((appName?: string): Promise<ConnectionListWebResponse> => {
     if (!connectorRef.current) {
       return Promise.reject(new Error("Not connected"));
     }
-    return connectorRef.current.getConnections();
+    return connectorRef.current.getConnections(appName);
   }, []);
 
-  // removeConnection()
-  // Removes/logs out a specific connection by id.
-  const removeConnection = useCallback((id: number): Promise<ConnectionRemovedResponse> => {
+  const removeConnection = useCallback((id: number, appName?: string): Promise<ConnectionRemovedResponse> => {
     if (!connectorRef.current) {
       return Promise.reject(new Error("Not connected"));
     }
-    return connectorRef.current.removeConnection(id);
+    return connectorRef.current.removeConnection(id, appName);
   }, []);
 
-  // resetTransactionState()
+  const currentSocketId = useCallback((): string | null => {
+    return connectorRef.current?.socketId ?? null;
+  }, []);
 
   const resetTransactionState = useCallback(() => {
     setTransactionStatus("idle");
@@ -270,7 +268,6 @@ export function useBChyperConnect(
   }, []);
 
   // Cleanup on unmount
-
   useEffect(() => {
     return () => {
       connectorRef.current?.disconnect();
@@ -295,5 +292,6 @@ export function useBChyperConnect(
     resetTransactionState,
     getConnections,
     removeConnection,
+    currentSocketId,
   };
 }

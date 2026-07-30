@@ -42,6 +42,7 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
   get isConnecting() { return this._isConnecting; }
   get address()      { return this.walletAddress;  }  // actual wallet address
   get session()      { return this.sessionCode;    }  // pairing session code
+  get socketId()     { return this.socket?.id ?? null; }  // current webSocketId
 
   // connect()
   // Fresh connect — requests QR from server, emits 'qr' event when ready.
@@ -114,31 +115,36 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
     this.socket = socket;
 
     socket.on("connect", () => {
-      socket.emit(
-        "webReconnect",
-        { sessionCode: savedSessionCode },
-        (response: { success?: boolean } | boolean) => {
-          const ok =
-            (response as { success?: boolean })?.success === true ||
-            response === true;
+      let settled = false;
 
-          if (!ok) {
-            // Session expired on server
-            this._reset("Session expired. Please reconnect.");
-          }
+      const handleResponse = (
+        response: { success?: boolean; status?: boolean } | boolean
+      ) => {
+        if (settled) return;
+        settled = true;
+        socket.off("webReconnect", handleResponse);
+
+        const ok =
+          (response as { success?: boolean; status?: boolean })?.success === true ||
+          (response as { success?: boolean; status?: boolean })?.status === true ||
+          response === true;
+
+        if (ok) {
+          this._isConnected = true;
+          this.emit("reconnected", { walletAddress: this.walletAddress ?? "" });
+        } else {
+          // Session expired on server
+          this._reset("Session expired. Please reconnect.");
         }
-      );
+      };
+
+      socket.on("webReconnect", handleResponse);
+      socket.emit("webReconnect", { sessionCode: savedSessionCode }, handleResponse);
     });
 
-    // otherDisconnected is reported on restored sessions too, so a genuine
-    // mobile-side disconnect (including one the user triggers manually from
-    // the mobile app) is never silently swallowed after a reconnect/reload.
+  
     this._attachCoreListeners(socket);
   }
-
-  // sendTransaction()
-  // Sends swap details to mobile for signing.
-  // Payload shape exactly matches SwapComponent.jsx → handleMobileConfirm()
 
   sendTransaction(transactionDetails: TransactionDetails): void {
     if (!this.socket?.connected) {
@@ -167,9 +173,11 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
     });
   }
 
-  // disconnect()
-  // Manual disconnect — mirrors disconnectBCSwap() in hook
-  disconnect(): void {
+  // closeSocket()
+  // Plain, synchronous socket teardown — no removeConnection cleanup. Used
+  // when replacing a stale socket for the SAME session (e.g. reconnectSession)
+  // where we must not tell the server to drop the session we're restoring.
+  closeSocket(): void {
     if (this.socket) {
       this.socket.disconnect();
     }
@@ -177,36 +185,110 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
     this._reset();
   }
 
-  // getConnections()
-  // Lists all active connections paired to this app name.
-  getConnections(): Promise<ConnectionListWebResponse> {
+  // disconnect()
+  // Manual disconnect — mirrors disconnectBCSwap() in hook.
+  // Tells the server to drop this session's connectionListWeb record BEFORE
+  // tearing down the socket — otherwise the server never sees the session as
+  // destroyed, since disconnect() closing the socket immediately afterward
+  // would prevent the connectionRemoveWeb emit from ever reaching the wire.
+  // Capped with a short timeout so a slow/unreachable server can't block
+  // disconnecting locally for long.
+  async disconnect(): Promise<void> {
+    const socket = this.socket;
+    const mySocketId = socket?.id;
+
+    if (socket?.connected && mySocketId) {
+      try {
+        await Promise.race([
+          (async () => {
+            const res = await this.getConnections();
+            const mine = res?.data?.sessions?.find((s) => s.webSocketId === mySocketId);
+            if (mine) await this.removeConnection(mine.id);
+          })(),
+          new Promise((resolve) => setTimeout(resolve, 2500)),
+        ]);
+      } catch {
+        // ignore — local disconnect still proceeds below
+      }
+    }
+
+    if (this.socket) {
+      this.socket.disconnect();
+    }
+    this._cleanup();
+    this._reset();
+  }
+
+  // NOTE: the server does not ack connectionListWeb/connectionRemoveWeb with a
+  // real socket.io ack packet (id-tagged 43<id>[...]) — it instead re-emits the
+  // result as a plain event (42["connectionListWeb", ...]), which never invokes
+  // the emit() callback. So we resolve from whichever arrives first: the ack
+  // callback (in case the server is ever fixed) or the plain event listener
+  // (what actually happens today).
+  getConnections(appName?: string): Promise<ConnectionListWebResponse> {
     return new Promise((resolve, reject) => {
       if (!this.socket?.connected) {
+        console.log("rejected:", "socket not connected");
         reject(new Error("Cannot list connections: socket not connected"));
         return;
       }
 
-      this.socket.emit(
+      const socket = this.socket;
+      let settled = false;
+
+      const onEvent = (response: ConnectionListWebResponse) => {
+        if (settled) return;
+        settled = true;
+        socket.off("connectionListWeb", onEvent);
+        console.log("response:", response);
+        resolve(response);
+      };
+      socket.on("connectionListWeb", onEvent);
+
+      socket.emit(
         "connectionListWeb",
-        { webAppName: this.appName },
-        (response: ConnectionListWebResponse) => resolve(response)
+        { webAppName: appName ?? this.appName },
+        (response: ConnectionListWebResponse) => {
+          if (settled) return;
+          settled = true;
+          socket.off("connectionListWeb", onEvent);
+          console.log("response:", response);
+          resolve(response);
+        }
       );
     });
   }
 
-  // removeConnection()
-  // Removes/logs out a specific connection by id (from getConnections()).
-  removeConnection(id: number): Promise<ConnectionRemovedResponse> {
+  removeConnection(id: number, appName?: string): Promise<ConnectionRemovedResponse> {
     return new Promise((resolve, reject) => {
       if (!this.socket?.connected) {
+        console.log("rejected:", "socket not connected");
         reject(new Error("Cannot remove connection: socket not connected"));
         return;
       }
 
-      this.socket.emit(
+      const socket = this.socket;
+      let settled = false;
+
+      const onEvent = (response: ConnectionRemovedResponse) => {
+        if (settled) return;
+        settled = true;
+        socket.off("connectionRemoveWeb", onEvent);
+        console.log("response:", response);
+        resolve(response);
+      };
+      socket.on("connectionRemoveWeb", onEvent);
+
+      socket.emit(
         "connectionRemoveWeb",
-        { webAppName: this.appName, id },
-        (response: ConnectionRemovedResponse) => resolve(response)
+        { webAppName: appName ?? this.appName, id },
+        (response: ConnectionRemovedResponse) => {
+          if (settled) return;
+          settled = true;
+          socket.off("connectionRemoveWeb", onEvent);
+          console.log("response:", response);
+          resolve(response);
+        }
       );
     });
   }

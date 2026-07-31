@@ -183,7 +183,7 @@ export function useBChyperConnect(
     });
 
     connector.connect();
-  }, [appName, pairingUrl, _resetState]);
+  }, [appName, pairingUrl, deviceInfo, _resetState]);
 
   // reconnectSession()
   // Runtime reconnect (no page reload) after mobile drops the connection.
@@ -222,7 +222,7 @@ export function useBChyperConnect(
     });
 
     connector.reconnect(savedSession, savedAddress);
-  }, [appName, pairingUrl, _resetState]);
+  }, [appName, pairingUrl, deviceInfo, _resetState]);
 
   // disconnectBCSwap()
   // Mirrors disconnectBCSwap() in useBCSwapConnect.js — intentional web-side

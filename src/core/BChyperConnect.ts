@@ -240,10 +240,10 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
         if (settled) return;
         settled = true;
         socket.off("connectionListWeb", onEvent);
-        console.log("response:", response);
+        // console.log("response:", response);
         resolve(response);
       };
-      socket.on("connectionListWeb", onEvent);
+      // socket.on("connectionListWeb", onEvent);
 
       socket.emit(
         "connectionListWeb",
@@ -252,7 +252,7 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
           if (settled) return;
           settled = true;
           socket.off("connectionListWeb", onEvent);
-          console.log("response:", response);
+          // console.log("response:", response);
           resolve(response);
         }
       );
@@ -274,7 +274,7 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
         if (settled) return;
         settled = true;
         socket.off("connectionRemoveWeb", onEvent);
-        console.log("response:", response);
+        // console.log("response:", response);
         resolve(response);
       };
       socket.on("connectionRemoveWeb", onEvent);
@@ -286,7 +286,7 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
           if (settled) return;
           settled = true;
           socket.off("connectionRemoveWeb", onEvent);
-          console.log("response:", response);
+          // console.log("response:", response);
           resolve(response);
         }
       );

@@ -38,11 +38,21 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
   }
 
   // Getters
-  get isConnected()  { return this._isConnected;  }
-  get isConnecting() { return this._isConnecting; }
-  get address()      { return this.walletAddress;  }  // actual wallet address
-  get session()      { return this.sessionCode;    }  // pairing session code
-  get socketId()     { return this.socket?.id ?? null; }  // current webSocketId
+  get isConnected() {
+    return this._isConnected;
+  }
+  get isConnecting() {
+    return this._isConnecting;
+  }
+  get address() {
+    return this.walletAddress;
+  } // actual wallet address
+  get session() {
+    return this.sessionCode;
+  } // pairing session code
+  get socketId() {
+    return this.socket?.id ?? null;
+  } // current webSocketId
 
   // connect()
   // Fresh connect — requests QR from server, emits 'qr' event when ready.
@@ -62,23 +72,32 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
     const webQrPayload = { webApp: this.appName, ...this.deviceInfo };
 
     const requestQr = () => {
-      if (qrRequested) return;
-
-      socket.emit("webQr", webQrPayload, (response: QrResponse | QrResponse[]) => {
-        const data = Array.isArray(response) ? response[0] : response;
-
-        if (data?.qrImage) {
-          if (data.sessionCode) this.sessionCode = data.sessionCode;
-          qrRequested = true;
-          this.emit("qr", {
-            ...webQrPayload,
-            qrImage: data.qrImage,
-            sessionCode: this.sessionCode ?? "",
-          });
-        } else {
-          this._reset("Failed to get QR code");
+      if (qrRequested) {
+        if (this.sessionCode) {
+          socket.emit("webReconnect", { sessionCode: this.sessionCode });
         }
-      });
+        return;
+      }
+
+      socket.emit(
+        "webQr",
+        webQrPayload,
+        (response: QrResponse | QrResponse[]) => {
+          const data = Array.isArray(response) ? response[0] : response;
+
+          if (data?.qrImage) {
+            if (data.sessionCode) this.sessionCode = data.sessionCode;
+            qrRequested = true;
+            this.emit("qr", {
+              ...webQrPayload,
+              qrImage: data.qrImage,
+              sessionCode: this.sessionCode ?? "",
+            });
+          } else {
+            this._reset("Failed to get QR code");
+          }
+        },
+      );
     };
 
     socket.on("connect", requestQr);
@@ -118,15 +137,17 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
       let settled = false;
 
       const handleResponse = (
-        response: { success?: boolean; status?: boolean } | boolean
+        response: { success?: boolean; status?: boolean } | boolean,
       ) => {
         if (settled) return;
         settled = true;
         socket.off("webReconnect", handleResponse);
 
         const ok =
-          (response as { success?: boolean; status?: boolean })?.success === true ||
-          (response as { success?: boolean; status?: boolean })?.status === true ||
+          (response as { success?: boolean; status?: boolean })?.success ===
+            true ||
+          (response as { success?: boolean; status?: boolean })?.status ===
+            true ||
           response === true;
 
         if (ok) {
@@ -139,10 +160,13 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
       };
 
       socket.on("webReconnect", handleResponse);
-      socket.emit("webReconnect", { sessionCode: savedSessionCode }, handleResponse);
+      socket.emit(
+        "webReconnect",
+        { sessionCode: savedSessionCode },
+        handleResponse,
+      );
     });
 
-  
     this._attachCoreListeners(socket);
   }
 
@@ -161,7 +185,8 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
     }
 
     const payload = {
-      sessionCode: this.sessionCode ?? localStorage.getItem(STORAGE_KEY_SESSION),
+      sessionCode:
+        this.sessionCode ?? localStorage.getItem(STORAGE_KEY_SESSION),
       walletAddress: currentAddress,
       remark: "send transaction",
       app: "DEX",
@@ -202,7 +227,9 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
         await Promise.race([
           (async () => {
             const res = await this.getConnections();
-            const mine = res?.data?.sessions?.find((s) => s.webSocketId === mySocketId);
+            const mine = res?.data?.sessions?.find(
+              (s) => s.webSocketId === mySocketId,
+            );
             if (mine) await this.removeConnection(mine.id);
           })(),
           new Promise((resolve) => setTimeout(resolve, 2500)),
@@ -244,7 +271,6 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
       };
       socket.on("connectionListWeb", onEvent);
 
-
       socket.emit(
         "connectionListWeb",
         { webAppName: appName ?? this.appName },
@@ -254,12 +280,15 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
           socket.off("connectionListWeb", onEvent);
           // console.log("response:", response);
           resolve(response);
-        }
+        },
       );
     });
   }
 
-  removeConnection(id: number, appName?: string): Promise<ConnectionRemovedResponse> {
+  removeConnection(
+    id: number,
+    appName?: string,
+  ): Promise<ConnectionRemovedResponse> {
     return new Promise((resolve, reject) => {
       if (!this.socket?.connected) {
         console.log("rejected:", "socket not connected");
@@ -288,7 +317,7 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
           socket.off("connectionRemoveWeb", onEvent);
           // console.log("response:", response);
           resolve(response);
-        }
+        },
       );
     });
   }
@@ -297,7 +326,7 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
 
   private _attachCoreListeners(
     socket: Socket,
-    options: { ignoreOtherDisconnected?: boolean } = {}
+    options: { ignoreOtherDisconnected?: boolean } = {},
   ): void {
     socket.on("mobileConnected", (data: MobileConnectedData) => {
       // sessionCode may come under different keys -- mirrors hook fallback chain
@@ -309,14 +338,14 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
 
       const walletAddress = data.walletAddress;
 
-      if (sessionCode)   this.sessionCode  = sessionCode;
+      if (sessionCode) this.sessionCode = sessionCode;
       if (walletAddress) this.walletAddress = walletAddress;
 
-      this._isConnected  = true;
+      this._isConnected = true;
       this._isConnecting = false;
 
       this.emit("connected", {
-        sessionCode:   this.sessionCode  ?? "",
+        sessionCode: this.sessionCode ?? "",
         walletAddress: this.walletAddress ?? "",
       });
     });
@@ -324,7 +353,7 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
     socket.on("mobileReconnected", (data: MobileReconnectedData) => {
       if (data.walletAddress) {
         this.walletAddress = data.walletAddress;
-        this._isConnected  = true;
+        this._isConnected = true;
         this._isConnecting = false;
       }
       this.emit("reconnected", { walletAddress: data.walletAddress ?? "" });
@@ -369,9 +398,9 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
   }
 
   private _reset(errorMessage?: string): void {
-    this._isConnected  = false;
+    this._isConnected = false;
     this._isConnecting = false;
-    this.sessionCode   = null;
+    this.sessionCode = null;
     this.walletAddress = null;
 
     if (errorMessage) {

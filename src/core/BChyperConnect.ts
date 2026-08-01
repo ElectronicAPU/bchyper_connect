@@ -240,10 +240,10 @@ export class BChyperConnect extends EventEmitter<BChyperEvents> {
         if (settled) return;
         settled = true;
         socket.off("connectionListWeb", onEvent);
-        // console.log("response:", response);
         resolve(response);
       };
-      // socket.on("connectionListWeb", onEvent);
+      socket.on("connectionListWeb", onEvent);
+
 
       socket.emit(
         "connectionListWeb",
